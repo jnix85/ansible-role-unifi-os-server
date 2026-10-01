@@ -1,0 +1,126 @@
+---
+# Ubiquiti's firmware metadata API. The role queries this to resolve the
+# current unifi-os-server installer URL for the host's architecture rather
+# than requiring a hardcoded or manually-copied download link (which would
+# go stale).
+unifi_os_server_firmware_api_url: "https://fw-update.ui.com/api/firmware-latest"
+
+# Maps `ansible_facts['architecture']` to the firmware API's `platform`
+# value for unifi-os-server. UniFi OS Server ships (and runs fine on, e.g. a
+# Raspberry Pi) both linux-x64 and linux-arm64 — there's no x64-only
+# restriction, despite what an earlier revision of this role assumed.
+unifi_os_server_arch_platforms:
+  x86_64: linux-x64
+  aarch64: linux-arm64
+
+# Release channel to install from: "release" (stable) or "beta-public".
+unifi_os_server_channel: "release"
+
+# Set this to override auto-detection and pin an exact installer URL instead
+# (e.g. to pin a specific version, or if fw-update.ui.com is unreachable from
+# the target's network). Leave blank to auto-resolve the latest release.
+unifi_os_server_installer_url: ""
+
+# Where to stage the downloaded installer on the target host.
+unifi_os_server_installer_dest: /root/unifi-os-server.bin
+
+# Re-download even if a file already exists at unifi_os_server_installer_dest.
+unifi_os_server_force_download: false
+
+# Set to false to exercise everything up to and including firmware-version
+# resolution, dependency install, and ufw lockdown without actually
+# downloading/running the (~880MB) installer or starting the UOS service.
+# Used by this role's Molecule tests, where the underlying container can't
+# run Podman-in-Podman/systemd services reliably; not intended for normal use.
+unifi_os_server_run_installer: true
+
+# Packages required by UniFi OS Server (it runs its stack under Podman).
+unifi_os_server_packages:
+  - podman
+  - uidmap
+  - slirp4netns
+  - curl
+  - ca-certificates
+
+# Whether this role installs and locks down ufw so that only SSH and the UniFi
+# OS Server ports below are reachable (default deny incoming, default allow
+# outgoing). Set to false if you manage firewalling elsewhere and don't want
+# this role touching ufw at all.
+unifi_os_server_manage_ufw: true
+
+# Port(s) to allow through ufw for SSH so the host doesn't lock you out when
+# unifi_os_server_manage_ufw sets a default-deny incoming policy.
+unifi_os_server_ssh_ports:
+  - 22
+
+unifi_os_server_ports:
+  - { port: 11443, proto: tcp, comment: "UniFi OS Server Web UI (HTTPS)" }
+  - { port: 8080, proto: tcp, comment: "UniFi device inform" }
+  - { port: 8443, proto: tcp, comment: "UniFi legacy controller" }
+  - { port: 8880, proto: tcp, comment: "UniFi guest portal HTTP" }
+  - { port: 8843, proto: tcp, comment: "UniFi guest portal HTTPS" }
+  - { port: 3478, proto: udp, comment: "UniFi STUN" }
+  - { port: 10001, proto: udp, comment: "UniFi device discovery" }
+  - { port: 1900, proto: udp, comment: "UPnP/UniFi discovery" }
+
+# How long to wait (seconds) for the web UI port to come up after install.
+# The installer often reports "unifi-core did not start within 60 seconds" even
+# on success — the service keeps initializing in the background.
+unifi_os_server_startup_timeout: 300
+
+# --- Let's Encrypt certificate for the UniFi OS Server web UI -------------
+#
+# Uses acme.sh with a DNS-01 challenge, so no inbound port 80 is ever needed
+# (keeping the deny-incoming ufw posture above intact). The cert import is
+# modeled on how GlennR's unifi-easy-encrypt.sh does it for a Podman-based
+# uosserver install: cert/key land in the uosserver data volume's
+# eus_certificates/ dir, referenced from unifi-core/config/overrides/
+# local.yml, service bounced to pick them up.
+unifi_os_server_ssl_enabled: false
+
+# Fully-qualified domain name to request the certificate for. This is the
+# primary name: it names the certbot certificate lineage
+# (/etc/letsencrypt/live/<fqdn>/) and is what the deploy hook imports from.
+unifi_os_server_ssl_fqdn: ""
+
+# Additional FQDNs to include on the same certificate as SANs, e.g.
+# ["uos1.example.com", "uos2.example.com"]. All names go on one cert; adding
+# names later expands the existing cert on the next run (certbot --expand).
+unifi_os_server_ssl_extra_fqdns: []
+
+# Email for Let's Encrypt expiry notices / ACME account registration.
+# Leave blank to register without one.
+unifi_os_server_ssl_email: ""
+
+# acme.sh DNS API hook name, passed to `acme.sh --issue --dns <hook>`.
+# e.g. dns_cf (Cloudflare), dns_aws (Route53), dns_dgon (DigitalOcean) —
+# see https://github.com/acmesh-official/acme.sh/wiki/dnsapi for the full
+# list of ~150 providers and the env vars each one expects.
+unifi_os_server_ssl_dns_provider: ""
+
+# Environment variables for the DNS hook above, e.g. for Cloudflare:
+#   unifi_os_server_ssl_dns_env:
+#     CF_Token: "{{ vault_cloudflare_api_token }}"
+#     CF_Zone_ID: "{{ vault_cloudflare_zone_id }}"      # optional
+#     CF_Account_ID: "{{ vault_cloudflare_account_id }}" # optional
+# Only needed on first issuance: acme.sh persists them (0600) into
+# <acme home>/account.conf for unattended renewals. The issue task runs with
+# no_log so these never appear in Ansible output.
+unifi_os_server_ssl_dns_env: {}
+
+# ACME CA to issue from. acme.sh's own default is zerossl; this role
+# defaults to Let's Encrypt.
+unifi_os_server_ssl_acme_ca: letsencrypt
+
+# Where acme.sh is cloned from / which ref to check out.
+unifi_os_server_ssl_acme_repo: https://github.com/acmesh-official/acme.sh.git
+unifi_os_server_ssl_acme_version: master
+
+# Where the acme.sh git checkout and its installed home (account.conf,
+# issued certs, cron-driven renewals) live on the target.
+unifi_os_server_ssl_acme_src_dir: /opt/acme.sh
+unifi_os_server_ssl_acme_home: /root/.acme.sh
+
+# Staging directory acme.sh installs the issued cert/key into; the import
+# script copies them from here into the uosserver data volume.
+unifi_os_server_ssl_cert_dir: /etc/uosserver-ssl

@@ -1,0 +1,20 @@
+---
+# Template for the ansible-vault encrypted secrets this inventory expects.
+# Setup:
+#   1. cp vault.yml.example vault.yml
+#   2. Fill in the real values below
+#   3. Put a vault password in .vault_pass at the repo root (referenced by
+#      ansible.cfg; gitignored)
+#   4. ansible-vault encrypt inventory/group_vars/unifi_os_server/vault.yml
+# vault.yml is gitignored — keep a backup of it and .vault_pass somewhere safe.
+
+# sudo password for ansible_user on the unifi_os_server hosts.
+vault_ansible_become_password: CHANGE_ME
+
+# Cloudflare credentials for acme.sh's dns_cf hook (DNS-01).
+# Token needs Zone / DNS / Edit on your zone. With a zone-scoped token,
+# Zone_ID and Account_ID let dns_cf skip zone discovery (otherwise the token
+# also needs Zone / Zone / Read). Both are on the zone's Overview page.
+vault_cloudflare_api_token: CHANGE_ME
+vault_cloudflare_zone_id: CHANGE_ME
+vault_cloudflare_account_id: CHANGE_ME

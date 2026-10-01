@@ -1,0 +1,78 @@
+---
+dependency:
+  name: galaxy
+  options:
+    requirements-file: molecule/default/requirements.yml
+
+driver:
+  name: docker
+
+platforms:
+  - name: unifi-os-server-ubuntu2204
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    command: /lib/systemd/systemd
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /run/lock
+    pre_build_image: true
+    groups:
+      - unifi_os_server
+
+  - name: unifi-os-server-debian12
+    image: geerlingguy/docker-debian12-ansible:latest
+    command: /lib/systemd/systemd
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /run/lock
+    pre_build_image: true
+    groups:
+      - unifi_os_server
+
+provisioner:
+  name: ansible
+  env:
+    # Lets converge.yml's `role: unifi_os_server` resolve — the role lives in
+    # the parent of this role's own directory (roles/unifi_os_server), i.e.
+    # roles/, which isn't on Ansible's default role search path.
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
+    # molecule_docker's bundled create.yml/destroy.yml use
+    # `when: (lookup('env', 'HOME'))`, a non-boolean conditional that
+    # ansible-core 2.21+ rejects by default (and will remove entirely in
+    # 2.23). This is a bug in molecule_docker itself, not in this role —
+    # allow it so `molecule test` works against current ansible-core until
+    # upstream fixes it.
+    ANSIBLE_ALLOW_BROKEN_CONDITIONALS: "true"
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+  inventory:
+    host_vars:
+      unifi-os-server-ubuntu2204:
+        unifi_os_server_run_installer: false
+      unifi-os-server-debian12:
+        unifi_os_server_run_installer: false
+
+verifier:
+  name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - cleanup
+    - destroy

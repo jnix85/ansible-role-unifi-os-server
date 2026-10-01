@@ -1,0 +1,109 @@
+---
+- name: Assert SSL FQDN was provided
+  ansible.builtin.assert:
+    that:
+      - unifi_os_server_ssl_fqdn | length > 0
+    fail_msg: "unifi_os_server_ssl_fqdn is required when unifi_os_server_ssl_enabled is true."
+
+- name: Assert an acme.sh DNS hook was selected
+  ansible.builtin.assert:
+    that:
+      - unifi_os_server_ssl_dns_provider is match('^dns_')
+    fail_msg: >-
+      unifi_os_server_ssl_dns_provider must be an acme.sh DNS API hook name
+      (dns_cf, dns_aws, ...) — see
+      https://github.com/acmesh-official/acme.sh/wiki/dnsapi
+
+- name: Assert DNS hook credentials were provided
+  ansible.builtin.assert:
+    that:
+      - unifi_os_server_ssl_dns_env | length > 0
+    fail_msg: >-
+      unifi_os_server_ssl_dns_env must contain the environment variables the
+      {{ unifi_os_server_ssl_dns_provider }} hook expects (e.g. CF_Token for
+      dns_cf) — see https://github.com/acmesh-official/acme.sh/wiki/dnsapi
+
+- name: Install acme.sh prerequisites
+  ansible.builtin.apt:
+    name:
+      - git
+      - cron
+      - openssl
+    state: present
+
+- name: Clone acme.sh
+  ansible.builtin.git:
+    repo: "{{ unifi_os_server_ssl_acme_repo }}"
+    dest: "{{ unifi_os_server_ssl_acme_src_dir }}"
+    version: "{{ unifi_os_server_ssl_acme_version }}"
+    depth: 1
+
+# --install sets up the acme.sh home, the daily renewal cron entry, and the
+# account email; it does not contact any CA yet.
+- name: Install acme.sh
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['./acme.sh', '--install', '--home', unifi_os_server_ssl_acme_home]
+        + (['--accountemail', unifi_os_server_ssl_email]
+           if unifi_os_server_ssl_email | length > 0 else [])
+      }}
+    chdir: "{{ unifi_os_server_ssl_acme_src_dir }}"
+    creates: "{{ unifi_os_server_ssl_acme_home }}/acme.sh"
+
+- name: Create certificate staging directory
+  ansible.builtin.file:
+    path: "{{ unifi_os_server_ssl_cert_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Deploy the certificate import script for UniFi OS Server
+  ansible.builtin.template:
+    src: unifi-os-server-cert-deploy-hook.sh.j2
+    dest: /usr/local/sbin/unifi-os-server-cert-install.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+# The DNS credentials are only needed here: acme.sh persists them into
+# account.conf (0600) so the cron-driven renewals run unattended. rc=2 means
+# "cert exists and isn't due — skipped", which is the idempotent no-op path;
+# a changed domain list makes acme.sh reissue automatically.
+- name: Issue the Let's Encrypt certificate via DNS-01 ({{ unifi_os_server_ssl_dns_provider }})
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [unifi_os_server_ssl_acme_home + '/acme.sh', '--issue',
+         '--server', unifi_os_server_ssl_acme_ca,
+         '--dns', unifi_os_server_ssl_dns_provider,
+         '--keylength', 'ec-256']
+        + (['-d'] | product([unifi_os_server_ssl_fqdn] + (unifi_os_server_ssl_extra_fqdns | default([])))
+           | flatten)
+      }}
+  environment: "{{ unifi_os_server_ssl_dns_env }}"
+  register: unifi_os_server_acme_issue
+  failed_when: unifi_os_server_acme_issue.rc not in [0, 2]
+  changed_when: unifi_os_server_acme_issue.rc == 0
+  no_log: true
+
+# --install-cert copies the cert/key to the staging dir and registers the
+# import script as the reloadcmd; acme.sh persists both in the cert's conf
+# and re-runs them after every renewal. The reloadcmd fires immediately on
+# this first install too, importing the cert into UniFi OS Server.
+- name: Install the certificate and register the UniFi OS Server import hook
+  ansible.builtin.command:
+    argv:
+      - "{{ unifi_os_server_ssl_acme_home }}/acme.sh"
+      - --install-cert
+      - --ecc
+      - -d
+      - "{{ unifi_os_server_ssl_fqdn }}"
+      - --fullchain-file
+      - "{{ unifi_os_server_ssl_cert_dir }}/fullchain.pem"
+      - --key-file
+      - "{{ unifi_os_server_ssl_cert_dir }}/privkey.pem"
+      - --reloadcmd
+      - /usr/local/sbin/unifi-os-server-cert-install.sh
+    creates: "{{ unifi_os_server_ssl_cert_dir }}/fullchain.pem"

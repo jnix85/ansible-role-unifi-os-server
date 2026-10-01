@@ -1,0 +1,87 @@
+# --- Private info — never commit -------------------------------------------
+
+# Real inventory and site config (commit the .example copies instead)
+inventory/hosts.yaml
+inventory/group_vars/unifi_os_server/vars.yml
+
+# Vault password
+.vault_pass
+.vault_pass*
+
+# Ansible Vault files. (These are AES256-encrypted and many teams do commit
+# them; excluded here by preference. If a vault file is the only copy of a
+# secret, back it up somewhere safe.)
+vault.yml
+*.vault
+*.vault.yml
+
+# Ad-hoc secret/credential files
+secrets/
+*.pem
+*.key
+*credentials*
+
+# --- Local machine state (contains real hostnames/paths) --------------------
+.claude/
+
+# --- Tooling ----------------------------------------------------------------
+.venv/
+*.retry
+.cache/
+
+# ==============================================================================
+# AI Assistants, Agents & Tooling
+# ==============================================================================
+# Claude Code / Anthropic
+.claude/
+CLAUDE.local.md
+
+# Cursor AI
+.cursor/
+.cursorrules
+.cursorignore
+.cursorindexingignore
+
+# Aider
+.aider*
+.aider.input.history
+.aider.chat.history.md
+.aider.llm.history
+.aider.tags.cache.v*
+
+# Google Gemini / Antigravity
+.gemini/
+gemini-debug.log
+.gemini-clipboard/
+
+# OpenAI / Codex / ChatGPT
+.codex/
+.openai/
+
+# Cline / Roo-Cline
+.cline/
+.clinerules
+cline_docs/
+
+# Continue
+.continue/
+.continuerc.json
+
+# Windsurf
+.windsurf/
+.windsurfrules
+
+# Serena MCP, comP & CodeSight
+.serena/
+.comp/
+.codesight/
+.agents/
+
+# Other AI dev tools
+.warp/
+.crush/
+.codeium/
+.deepseek/
+.amazon-codewhisperer/
+.tabnine/
+.tabnineignore

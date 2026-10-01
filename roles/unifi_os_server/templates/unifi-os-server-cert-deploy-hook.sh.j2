@@ -1,0 +1,30 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Imports the Let's Encrypt certificate for {{ unifi_os_server_ssl_fqdn }}
+# into UniFi OS Server. Registered as acme.sh's --reloadcmd, so it runs on
+# initial issuance and after every renewal (acme.sh copies the renewed
+# cert/key into {{ unifi_os_server_ssl_cert_dir }} first, then calls this).
+set -euo pipefail
+
+cert_src="{{ unifi_os_server_ssl_cert_dir }}"
+data_dir="/home/uosserver/.local/share/containers/storage/volumes/uosserver_data/_data"
+cert_dir="${data_dir}/eus_certificates"
+overrides_dir="${data_dir}/unifi-core/config/overrides"
+
+systemctl stop uosserver.service
+
+mkdir -p "${cert_dir}" "${overrides_dir}"
+cp "${cert_src}/fullchain.pem" "${cert_dir}/unifi-os.crt"
+cp "${cert_src}/privkey.pem" "${cert_dir}/unifi-os.key"
+
+if [[ ! -f "${overrides_dir}/local.yml" ]] || ! grep -iq '^ssl:' "${overrides_dir}/local.yml"; then
+  cat >> "${overrides_dir}/local.yml" <<'YML'
+ssl:
+  crt: '/data/eus_certificates/unifi-os.crt'
+  key: '/data/eus_certificates/unifi-os.key'
+YML
+fi
+
+chown -R uosserver:uosserver "${cert_dir}" "${overrides_dir}"
+
+systemctl start uosserver.service

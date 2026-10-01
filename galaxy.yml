@@ -1,0 +1,38 @@
+---
+namespace: jnix85
+name: unifi
+version: 1.0.0
+readme: README.md
+authors:
+  - jnix85
+description: >-
+  Install Ubiquiti UniFi OS Server on Debian/Ubuntu — dependency install,
+  release auto-resolution, ufw lockdown, and an optional auto-renewing
+  Let's Encrypt certificate via acme.sh (DNS-01).
+license:
+  - MIT
+tags:
+  - unifi
+  - ubiquiti
+  - networking
+  - letsencrypt
+  - acme
+  - ufw
+  - podman
+  - infrastructure
+dependencies:
+  community.general: ">=5.0.0"
+repository: https://github.com/jnix85/ansible-role-unifi-os-server
+issues: https://github.com/jnix85/ansible-role-unifi-os-server/issues
+
+# Keep the local playbook wrapper, inventory, and anything private out of
+# the built collection artifact.
+build_ignore:
+  - .vault_pass*
+  - .venv
+  - .claude
+  - .gitignore
+  - ansible.cfg
+  - site.yml
+  - inventory
+  - "*.tar.gz"

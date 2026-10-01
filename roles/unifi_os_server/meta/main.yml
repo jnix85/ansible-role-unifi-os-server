@@ -1,0 +1,36 @@
+---
+galaxy_info:
+  role_name: unifi_os_server
+  namespace: jnix85
+  author: jnix85
+  description: >-
+    Install Ubiquiti UniFi OS Server on Debian/Ubuntu, with ufw lockdown and
+    an optional Let's Encrypt certificate via acme.sh (DNS-01)
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - unifi
+    - ubiquiti
+    - networking
+    - letsencrypt
+    - acme
+    - certificate
+    - ufw
+    - podman
+
+dependencies: []
+
+# Collections used by this role (community.general for the ufw module).
+# Galaxy doesn't auto-install these for standalone roles — consumers need
+# them installed (see README Requirements).
+collections:
+  - community.general

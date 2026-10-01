@@ -1,0 +1,67 @@
+---
+# Group vars for unifi_os_server hosts. Plaintext only — secrets go in
+# vault.yml next to this file (ansible-vault encrypted, vars prefixed
+# vault_ and referenced from here). Commented entries show the role's
+# defaults from roles/unifi_os_server/defaults/main.yml.
+
+# --- Connection ------------------------------------------------------------
+
+ansible_user: ansible
+ansible_become_password: "{{ vault_ansible_become_password }}"
+
+# Pin the interpreter instead of per-run discovery — silences the
+# "discovered Python interpreter ... could cause a different interpreter"
+# warning and keeps module behavior stable across OS python upgrades.
+ansible_python_interpreter: /usr/bin/python3
+
+# --- Let's Encrypt (DNS-01 via acme.sh) -------------------------------------
+
+unifi_os_server_ssl_enabled: true
+
+# Primary name — names the acme.sh cert and the import paths.
+unifi_os_server_ssl_fqdn: uos.example.com
+
+# Extra SANs on the same cert. Adding names later reissues the cert with the
+# expanded set on the next run.
+unifi_os_server_ssl_extra_fqdns:
+  - uos1.example.com
+  - uos2.example.com
+
+# Email for the ACME account / expiry notices (blank = register without).
+unifi_os_server_ssl_email: admin@example.com
+
+# acme.sh DNS API hook (https://github.com/acmesh-official/acme.sh/wiki/dnsapi).
+unifi_os_server_ssl_dns_provider: dns_cf
+
+# Cloudflare credentials for the dns_cf hook, from vault.yml. Set them with:
+#   ansible-vault edit inventory/group_vars/unifi_os_server/vault.yml
+# Zone_ID/Account_ID are optional — remove them if your token has
+# account-wide Zone:Read and you'd rather let dns_cf discover the zone.
+unifi_os_server_ssl_dns_env:
+  CF_Token: "{{ vault_cloudflare_api_token }}"
+  CF_Zone_ID: "{{ vault_cloudflare_zone_id }}"
+  CF_Account_ID: "{{ vault_cloudflare_account_id }}"
+
+# --- Installer ------------------------------------------------------------
+
+# Release channel: "release" (stable) or "beta-public".
+unifi_os_server_channel: release
+
+# Pin an exact installer URL instead of auto-resolving the latest release.
+# unifi_os_server_installer_url: ""
+
+# Re-download the installer even if already present on the target.
+# unifi_os_server_force_download: false
+
+# Seconds to wait for the web UI (port 11443) after install.
+# unifi_os_server_startup_timeout: 300
+
+# --- Firewall (ufw) -------------------------------------------------------
+
+# Set false if you manage firewalling elsewhere.
+unifi_os_server_manage_ufw: true
+
+# SSH port(s) to keep open — set BEFORE running if SSH isn't on 22,
+# or the default-deny policy will lock you out.
+# unifi_os_server_ssh_ports:
+#   - 22

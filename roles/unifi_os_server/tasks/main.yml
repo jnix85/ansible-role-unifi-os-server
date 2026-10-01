@@ -1,0 +1,194 @@
+---
+- name: Assert supported OS
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == 'Debian'
+      - >-
+        (ansible_facts['distribution'] == 'Ubuntu' and
+         ansible_facts['distribution_major_version'] | int >= 22) or
+        (ansible_facts['distribution'] == 'Debian' and
+         ansible_facts['distribution_major_version'] | int >= 12)
+    fail_msg: >-
+      UniFi OS Server requires Ubuntu 22.04+ or Debian 12+. Detected
+      {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
+    success_msg: "OS is supported for UniFi OS Server."
+
+- name: Assert supported architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['architecture'] in unifi_os_server_arch_platforms
+    fail_msg: >-
+      UniFi OS Server only ships Linux installers for
+      {{ unifi_os_server_arch_platforms.keys() | join(', ') }}. Detected
+      architecture: {{ ansible_facts['architecture'] }}.
+
+- name: Set the firmware-API platform string for this host's architecture
+  ansible.builtin.set_fact:
+    unifi_os_server_platform: "{{ unifi_os_server_arch_platforms[ansible_facts['architecture']] }}"
+
+- name: Check whether UniFi OS Server is already installed
+  ansible.builtin.stat:
+    path: /etc/systemd/system/uosserver.service
+  register: unifi_os_server_unit
+
+- name: Query Ubiquiti firmware API for the latest UniFi OS Server release
+  ansible.builtin.uri:
+    url: "{{ unifi_os_server_firmware_api_url }}"
+    return_content: true
+  register: unifi_os_server_firmware_response
+  when:
+    - not unifi_os_server_unit.stat.exists
+    - unifi_os_server_installer_url | length == 0
+
+- name: Resolve the matching installer entries for the selected channel
+  ansible.builtin.set_fact:
+    unifi_os_server_resolved_candidates: >-
+      {{
+        unifi_os_server_firmware_response.json._embedded.firmware
+        | selectattr('product', 'equalto', 'unifi-os-server')
+        | selectattr('platform', 'equalto', unifi_os_server_platform)
+        | selectattr('channel', 'equalto', unifi_os_server_channel)
+        | list
+      }}
+  when:
+    - not unifi_os_server_unit.stat.exists
+    - unifi_os_server_installer_url | length == 0
+
+- name: Assert a matching firmware entry was found
+  ansible.builtin.assert:
+    that:
+      - unifi_os_server_resolved_candidates | length > 0
+    fail_msg: >-
+      No unifi-os-server / {{ unifi_os_server_platform }} entry found on the
+      "{{ unifi_os_server_channel }}" channel from the firmware API. Set
+      unifi_os_server_installer_url to override auto-resolution.
+  when:
+    - not unifi_os_server_unit.stat.exists
+    - unifi_os_server_installer_url | length == 0
+
+# The firmware API serves exactly one current entry per product/platform/
+# channel (no version history retained), so there's nothing to disambiguate.
+- name: Pick the resolved candidate
+  ansible.builtin.set_fact:
+    unifi_os_server_resolved_entry: "{{ unifi_os_server_resolved_candidates | first }}"
+  when:
+    - not unifi_os_server_unit.stat.exists
+    - unifi_os_server_installer_url | length == 0
+
+- name: Set resolved installer URL/version and effective URL as facts
+  ansible.builtin.set_fact:
+    unifi_os_server_effective_url: >-
+      {{ unifi_os_server_installer_url
+         if unifi_os_server_installer_url | length > 0
+         else unifi_os_server_resolved_entry._links.data.href }}
+    unifi_os_server_resolved_version: "{{ unifi_os_server_resolved_entry.version | default('n/a') }}"
+  when: not unifi_os_server_unit.stat.exists
+
+- name: Report installer URL to be used
+  ansible.builtin.debug:
+    msg: >-
+      Installing UniFi OS Server {{ unifi_os_server_resolved_version }}
+      ({{ unifi_os_server_channel }} channel) from {{ unifi_os_server_effective_url }}
+  when: not unifi_os_server_unit.stat.exists
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: not unifi_os_server_unit.stat.exists
+
+- name: Install UniFi OS Server dependencies
+  ansible.builtin.apt:
+    name: "{{ unifi_os_server_packages }}"
+    state: present
+  when: not unifi_os_server_unit.stat.exists
+
+- name: Download UniFi OS Server installer
+  ansible.builtin.get_url:
+    url: "{{ unifi_os_server_effective_url }}"
+    dest: "{{ unifi_os_server_installer_dest }}"
+    mode: "0755"
+    force: "{{ unifi_os_server_force_download }}"
+  when:
+    - not unifi_os_server_unit.stat.exists
+    - unifi_os_server_run_installer
+
+- name: Run UniFi OS Server installer (unattended)
+  ansible.builtin.shell: |
+    set -o pipefail
+    yes y | {{ unifi_os_server_installer_dest }}
+  args:
+    executable: /bin/bash
+    creates: /etc/systemd/system/uosserver.service
+  register: unifi_os_server_install
+  changed_when: true
+  when:
+    - not unifi_os_server_unit.stat.exists
+    - unifi_os_server_run_installer
+
+- name: Reload systemd unit files
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: unifi_os_server_run_installer
+
+- name: Enable and start UniFi OS Server services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - uosserver.service
+    - uosserver-updater.service
+  when: unifi_os_server_run_installer
+
+- name: Install ufw
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+  when: unifi_os_server_manage_ufw
+
+- name: Set ufw default policy - deny incoming
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+  when: unifi_os_server_manage_ufw
+
+- name: Set ufw default policy - allow outgoing
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+  when: unifi_os_server_manage_ufw
+
+- name: Allow SSH through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+    comment: SSH
+  loop: "{{ unifi_os_server_ssh_ports }}"
+  when: unifi_os_server_manage_ufw
+
+- name: Allow UniFi OS Server ports through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    comment: "{{ item.comment }}"
+  loop: "{{ unifi_os_server_ports }}"
+  when: unifi_os_server_manage_ufw
+
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled
+  when: unifi_os_server_manage_ufw
+
+- name: Wait for UniFi OS Server web UI to come up
+  ansible.builtin.wait_for:
+    port: 11443
+    delay: 10
+    timeout: "{{ unifi_os_server_startup_timeout }}"
+  when: unifi_os_server_run_installer
+
+- name: Configure Let's Encrypt certificate for UniFi OS Server
+  ansible.builtin.include_tasks: ssl.yml
+  when: unifi_os_server_ssl_enabled

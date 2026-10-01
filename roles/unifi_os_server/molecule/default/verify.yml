@@ -1,0 +1,86 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  vars:
+    # Mirrors unifi_os_server_arch_platforms in ../../defaults/main.yml — this
+    # playbook doesn't inherit the role's defaults, so it's duplicated here.
+    unifi_os_server_verify_arch_platforms:
+      x86_64: linux-x64
+      aarch64: linux-arm64
+  tasks:
+    - name: Gather package facts
+      ansible.builtin.package_facts:
+
+    - name: Assert required dependency packages are installed
+      ansible.builtin.assert:
+        that:
+          - "'podman' in ansible_facts.packages"
+          - "'uidmap' in ansible_facts.packages"
+          - "'slirp4netns' in ansible_facts.packages"
+          - "'curl' in ansible_facts.packages"
+          - "'ca-certificates' in ansible_facts.packages"
+        fail_msg: "One or more required UniFi OS Server dependency packages are missing."
+
+    - name: Assert ufw is installed
+      ansible.builtin.assert:
+        that:
+          - "'ufw' in ansible_facts.packages"
+
+    - name: Check ufw status
+      ansible.builtin.command: ufw status verbose
+      register: unifi_os_server_ufw_status
+      changed_when: false
+
+    - name: Assert ufw default policy is deny incoming / allow outgoing
+      ansible.builtin.assert:
+        that:
+          - "'Default: deny (incoming), allow (outgoing)' in unifi_os_server_ufw_status.stdout"
+        fail_msg: |
+          Unexpected ufw default policy:
+          {{ unifi_os_server_ufw_status.stdout }}
+
+    - name: Assert SSH is allowed through ufw
+      ansible.builtin.assert:
+        that:
+          - "'22/tcp' in unifi_os_server_ufw_status.stdout"
+
+    - name: Assert each UniFi OS Server port is allowed through ufw
+      ansible.builtin.assert:
+        that:
+          - "(item.port | string + '/' + item.proto) in unifi_os_server_ufw_status.stdout"
+        fail_msg: "Port {{ item.port }}/{{ item.proto }} is not allowed through ufw."
+      loop:
+        - { port: 11443, proto: tcp }
+        - { port: 8080, proto: tcp }
+        - { port: 8443, proto: tcp }
+        - { port: 8880, proto: tcp }
+        - { port: 8843, proto: tcp }
+        - { port: 3478, proto: udp }
+        - { port: 10001, proto: udp }
+        - { port: 1900, proto: udp }
+
+    - name: Query Ubiquiti firmware API directly (sanity check for role's resolution logic)
+      ansible.builtin.uri:
+        url: https://fw-update.ui.com/api/firmware-latest
+        return_content: true
+      register: unifi_os_server_verify_firmware
+
+    - name: Resolve the release entry matching this host's architecture, as the role would
+      ansible.builtin.set_fact:
+        unifi_os_server_verify_entry: >-
+          {{
+            unifi_os_server_verify_firmware.json._embedded.firmware
+            | selectattr('product', 'equalto', 'unifi-os-server')
+            | selectattr('platform', 'equalto', unifi_os_server_verify_arch_platforms[ansible_facts['architecture']])
+            | selectattr('channel', 'equalto', 'release')
+            | list
+            | first
+          }}
+
+    - name: Assert the resolved entry has a usable version and download link
+      ansible.builtin.assert:
+        that:
+          - unifi_os_server_verify_entry.version is defined
+          - unifi_os_server_verify_entry._links.data.href is match('^https://fw-download\.ubnt\.com/.*')
+        fail_msg: "Firmware API response no longer matches the shape the role expects."

@@ -1,0 +1,3 @@
+unifi_os_server:
+  hosts:
+    uos.example.com:
