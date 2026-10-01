@@ -1,0 +1,6 @@
+---
+- name: Install UniFi OS Server
+  hosts: unifi_os_server
+  become: true
+  roles:
+    - role: unifi_os_server
